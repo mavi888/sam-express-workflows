@@ -2,11 +2,6 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: 'AWS::Serverless-2016-10-31'
 
 Resources:
-
-  MyApi:
-    Type: AWS::Serverless::Api
-    Properties:
-      StageName: dev
     
   HelloFunction:
     Type: 'AWS::Serverless::Function'
@@ -14,23 +9,76 @@ Resources:
       Handler: handler.hello
       Runtime: nodejs12.x
       CodeUri: ./hello
-      Events:
-        HelloAPI:
-          Type: Api
-          Properties:
-            RestApiId: !Ref MyApi
-            Path: /hello
-            Method: GET
-  
-Outputs:
-  Region:
-    Description: "Region"
-    Value: !Ref AWS::Region
 
-  ApiId:
-    Description: "API ID"
-    Value: !Ref MyApi
+  MyStepFunction:
+    Type: AWS::StepFunctions::StateMachine
+    Properties: 
+      StateMachineName: MyStepFunction
+      StateMachineType: EXPRESS
+      LoggingConfiguration: 
+        Destinations: 
+          - CloudWatchLogsLogGroup: 
+              LogGroupArn: !GetAtt MyLogGroup.Arn
+        Level: ALL
+      DefinitionString: |-
+        {
+          "StartAt": "Lambda",
+          "States": {
+            "Lambda": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "<YOUR ARN>",
+                "Payload": {
+                  "Input.$": "$"
+                }
+              },
+              "End": true
+            }
+          }
+        }
+      RoleArn: !GetAtt RootRole.Arn
 
-  ApiUrl:
-    Description: "API endpoint URL for Prod environment"
-    Value: !Sub 'https://${MyApi}.execute-api.${AWS::Region}.amazonaws.com/dev/'
+  RootRole: 
+    Type: "AWS::IAM::Role"
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: "Allow"
+            Principal: 
+              Service: 
+                - "states.amazonaws.com"
+            Action: 
+              - "sts:AssumeRole"
+      Path: "/service-role/"
+
+  RolePolicies: 
+    Type: "AWS::IAM::Policy"
+    Properties: 
+      PolicyName: "root"
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: "Allow"
+            Action: "lambda:InvokeFunction"
+            Resource: !GetAtt HelloFunction.Arn
+          - Effect: "Allow"
+            Action: 
+              - "logs:CreateLogDelivery"
+              - "logs:GetLogDelivery"
+              - "logs:UpdateLogDelivery"
+              - "logs:DeleteLogDelivery"
+              - "logs:ListLogDeliveries"
+              - "logs:PutResourcePolicy"
+              - "logs:DescribeResourcePolicies"
+              - "logs:DescribeLogGroups"
+            Resource: "*"
+      Roles: 
+        - 
+          Ref: "RootRole"
+
+  MyLogGroup: 
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      RetentionInDays: 1
